@@ -1,16 +1,16 @@
 import { N8N_WEBHOOK_URL } from '../constants';
-import { N8NResponse } from '../types';
+import { UserContext } from '../types';
 
 /**
  * Sends a message to the n8n webhook and retrieves the response.
  */
-export const sendMessageToN8N = async (message: string): Promise<string> => {
+export const sendMessageToN8N = async (message: string, userContext: UserContext): Promise<string> => {
   
   // Simulation mode if URL is not configured
   // Casting to string avoids TS strict comparison errors if constant is a specific string type
   if ((N8N_WEBHOOK_URL as string) === 'PLACEHOLDER_URL') {
     await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
-    return `Simulação: Recebi sua mensagem: "${message}". \n\nPara funcionar de verdade, configure a constante N8N_WEBHOOK_URL no arquivo constants.ts com o link do seu webhook n8n.`;
+    return `Simulação: Recebi sua mensagem: "${message}". \n\nDados enviados:\nUser: ${userContext.name} (${userContext.email})\nSessionID: ${userContext.sessionId}`;
   }
 
   try {
@@ -20,7 +20,10 @@ export const sendMessageToN8N = async (message: string): Promise<string> => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ 
-        chatInput: message, // Adjust key based on what your n8n webhook expects
+        chatInput: message, 
+        sessionId: userContext.sessionId,
+        userName: userContext.name,
+        userEmail: userContext.email,
         timestamp: new Date().toISOString()
       }),
     });

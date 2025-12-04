@@ -24,6 +24,12 @@ export enum Theme {
   System = 'system'
 }
 
+export interface UserContext {
+  sessionId: string;
+  name: string;
+  email: string;
+}
+
 export interface N8NResponse {
   output: string; // Adapt this based on your actual N8N JSON response structure
 }

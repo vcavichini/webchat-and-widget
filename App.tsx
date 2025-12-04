@@ -1,18 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Moon, Sun, Monitor, MoreVertical, X } from 'lucide-react';
-import { Message, Sender, Theme } from './types';
+import { Send, Moon, Sun, Monitor, MoreVertical, X, LogOut, MessageSquare, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Message, Sender, Theme, UserContext } from './types';
 import { INITIAL_GREETING } from './constants';
 import { sendMessageToN8N } from './services/n8nService';
 import MessageBubble from './components/MessageBubble';
 import TypingIndicator from './components/TypingIndicator';
 
-const App: React.FC = () => {
+interface AppProps {
+  onBack?: () => void;
+}
+
+const App: React.FC<AppProps> = ({ onBack }) => {
   // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [theme, setTheme] = useState<Theme>(Theme.System);
   const [showMenu, setShowMenu] = useState(false);
+  
+  // User Session State
+  const [userContext, setUserContext] = useState<UserContext | null>(null);
+  
+  // Login Form State
+  const [tempName, setTempName] = useState('');
+  const [tempEmail, setTempEmail] = useState('');
 
   // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -20,15 +31,7 @@ const App: React.FC = () => {
 
   // Initialize Greeting
   useEffect(() => {
-    setMessages([
-      {
-        id: 'init-1',
-        text: INITIAL_GREETING,
-        sender: Sender.Bot,
-        timestamp: new Date(),
-        reactions: []
-      },
-    ]);
+    // Only set greeting if it's the first load and empty (logic handled in login now)
   }, []);
 
   // Theme Management
@@ -49,11 +52,31 @@ const App: React.FC = () => {
     localStorage.setItem('chat-theme', theme);
   }, [theme]);
 
-  // Load saved theme
+  // Load saved theme and session
   useEffect(() => {
     const savedTheme = localStorage.getItem('chat-theme') as Theme | null;
     if (savedTheme) {
       setTheme(savedTheme);
+    }
+
+    const savedSession = localStorage.getItem('chat-user-context');
+    if (savedSession) {
+      try {
+        const parsed = JSON.parse(savedSession);
+        setUserContext(parsed);
+        // If returning user, restore messages or show greeting
+        setMessages([
+            {
+              id: 'init-1',
+              text: `Bem-vindo de volta, ${parsed.name.split(' ')[0]}! \n${INITIAL_GREETING}`,
+              sender: Sender.Bot,
+              timestamp: new Date(),
+              reactions: []
+            },
+        ]);
+      } catch (e) {
+        console.error("Failed to parse session", e);
+      }
     }
   }, []);
 
@@ -63,12 +86,47 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isLoading]);
+    if (userContext) {
+        scrollToBottom();
+    }
+  }, [messages, isLoading, userContext]);
 
   // Handlers
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tempName.trim() || !tempEmail.trim()) return;
+
+    const newContext: UserContext = {
+        name: tempName,
+        email: tempEmail,
+        sessionId: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() // Fallback for older browsers
+    };
+
+    setUserContext(newContext);
+    localStorage.setItem('chat-user-context', JSON.stringify(newContext));
+
+    setMessages([
+        {
+          id: 'init-1',
+          text: `Olá, ${tempName.split(' ')[0]}! \n${INITIAL_GREETING}`,
+          sender: Sender.Bot,
+          timestamp: new Date(),
+          reactions: []
+        },
+    ]);
+  };
+
+  const handleLogout = () => {
+    setUserContext(null);
+    localStorage.removeItem('chat-user-context');
+    setMessages([]);
+    setShowMenu(false);
+    setTempName('');
+    setTempEmail('');
+  };
+
   const handleSend = async () => {
-    if (!input.trim()) return;
+    if (!input.trim() || !userContext) return;
 
     const userText = input.trim();
     const newMessage: Message = {
@@ -84,7 +142,7 @@ const App: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const responseText = await sendMessageToN8N(userText);
+      const responseText = await sendMessageToN8N(userText, userContext);
       
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -95,7 +153,6 @@ const App: React.FC = () => {
       };
       setMessages((prev) => [...prev, botMessage]);
     } catch (error: any) {
-      // Logic to display the actual error if the service throws one
       const errorText = error instanceof Error 
         ? error.message 
         : typeof error === 'string' 
@@ -175,10 +232,11 @@ const App: React.FC = () => {
   };
 
   const clearChat = () => {
+     if (!userContext) return;
      setMessages([
       {
         id: Date.now().toString(),
-        text: INITIAL_GREETING,
+        text: `Vamos recomeçar, ${userContext.name.split(' ')[0]}! \nComo posso ajudar?`,
         sender: Sender.Bot,
         timestamp: new Date(),
         reactions: []
@@ -187,17 +245,99 @@ const App: React.FC = () => {
     setShowMenu(false);
   };
 
+  // Render Login Form (Pre-chat)
+  if (!userContext) {
+      return (
+        <div className="flex flex-col h-full w-full bg-white dark:bg-slate-900 shadow-xl overflow-hidden relative">
+            {/* Minimal Header */}
+            <header className="flex-none px-6 py-6 flex justify-between items-center z-20">
+                <div className="flex items-center gap-2">
+                    {onBack && (
+                      <button onClick={onBack} className="mr-2 text-slate-500 hover:text-blue-600 transition-colors">
+                        <ArrowLeft size={24} />
+                      </button>
+                    )}
+                    <div className="bg-blue-600 p-1.5 rounded-lg text-white">
+                        <MessageSquare size={20} />
+                    </div>
+                    <span className="font-bold text-lg text-slate-800 dark:text-white">Assistente</span>
+                </div>
+                {/* Theme Toggle (Mini) */}
+                <button 
+                    onClick={() => setTheme(theme === Theme.Dark ? Theme.Light : Theme.Dark)}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                >
+                    {theme === Theme.Dark ? <Sun size={20}/> : <Moon size={20} />}
+                </button>
+            </header>
+
+            <main className="flex-1 px-8 flex flex-col justify-center animate-fade-in pb-12">
+                <div className="mb-8">
+                    <h2 className="text-2xl font-bold text-slate-800 dark:text-white mb-2">Olá! 👋</h2>
+                    <p className="text-slate-500 dark:text-slate-400">
+                        Preencha seus dados para iniciar o atendimento personalizado.
+                    </p>
+                </div>
+
+                <form onSubmit={handleLogin} className="space-y-4">
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Nome</label>
+                        <input 
+                            type="text" 
+                            required
+                            placeholder="Seu nome"
+                            value={tempName}
+                            onChange={(e) => setTempName(e.target.value)}
+                            className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+                    <div>
+                        <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">E-mail</label>
+                        <input 
+                            type="email" 
+                            required
+                            placeholder="seu@email.com"
+                            value={tempEmail}
+                            onChange={(e) => setTempEmail(e.target.value)}
+                            className="w-full bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-xl px-4 py-3 text-slate-800 dark:text-slate-100 outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+                    
+                    <button 
+                        type="submit"
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3.5 rounded-xl shadow-lg shadow-blue-500/30 transition-all flex items-center justify-center gap-2 group mt-2"
+                    >
+                        Iniciar Conversa
+                        <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                    </button>
+                </form>
+            </main>
+            
+            <div className="p-4 text-center text-xs text-slate-300 dark:text-slate-600">
+                Powered by BotLab
+            </div>
+        </div>
+      );
+  }
+
+  // Render Chat Interface
   return (
-    // Changed: h-full w-full instead of h-[100dvh] max-w-4xl
     <div className="flex flex-col h-full w-full bg-gray-50 dark:bg-slate-900 shadow-xl overflow-hidden relative">
       
       {/* Header */}
       <header className="flex-none bg-white dark:bg-slate-800 border-b border-gray-200 dark:border-slate-700 px-4 py-3 flex justify-between items-center z-20">
         <div className="flex items-center gap-3">
+            {onBack && (
+                <button onClick={onBack} className="mr-1 text-slate-500 hover:text-blue-600 transition-colors">
+                  <ArrowLeft size={20} />
+                </button>
+            )}
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
             <div>
                 <h1 className="font-bold text-lg text-slate-800 dark:text-white leading-tight">Assistente</h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Online</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[150px]">
+                    {userContext.email}
+                </p>
             </div>
         </div>
 
@@ -240,9 +380,18 @@ const App: React.FC = () => {
                     <div className="absolute right-0 top-full mt-2 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-gray-200 dark:border-slate-700 py-1 overflow-hidden animate-fade-in origin-top-right z-30">
                         <button 
                             onClick={clearChat}
-                            className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors flex items-center gap-2"
                         >
-                            Limpar conversa
+                            <MessageSquare size={14} />
+                            Limpar mensagens
+                        </button>
+                        <div className="h-px bg-gray-100 dark:bg-slate-700 my-1"></div>
+                        <button 
+                            onClick={handleLogout}
+                            className="w-full text-left px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-2"
+                        >
+                            <LogOut size={14} />
+                            Sair / Trocar conta
                         </button>
                     </div>
                 )}
